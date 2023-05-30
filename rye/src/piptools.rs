@@ -58,3 +58,10 @@ pub fn get_pip_compile(py_ver: &PythonVersion, output: CommandOutput) -> Result<
         .join(VENV_BIN)
         .join("pip-compile"))
 }
+
+pub fn get_rustine(py_ver: &PythonVersion, output: CommandOutput) -> Result<PathBuf, Error> {
+    Ok(get_pip_tools_bin(py_ver, output)?
+        .join(VENV_BIN)
+        .join("rustine"))
+}
+

@@ -4,7 +4,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
-use std::{fmt, fs};
+use std::{env, fmt, fs};
 
 use anyhow::{anyhow, bail, Context, Error};
 use minijinja::render;
@@ -15,7 +15,7 @@ use serde::Serialize;
 use tempfile::NamedTempFile;
 use url::Url;
 
-use crate::piptools::get_pip_compile;
+use crate::piptools::{get_pip_compile, get_rustine};
 use crate::pyproject::{
     normalize_package_name, DependencyKind, ExpandedSources, PyProject, Workspace,
 };
@@ -314,23 +314,13 @@ fn generate_lockfile(
         fs::write(&requirements_file, b"")?;
     }
 
-    let pip_compile = get_pip_compile(py_ver, output)?;
-    let mut cmd = Command::new(pip_compile);
-    cmd.arg("--resolver=backtracking")
-        .arg("--no-annotate")
-        .arg("--strip-extras")
-        .arg("--allow-unsafe")
-        .arg("--no-header")
-        .arg("--pip-args")
-        .arg(format!(
-            "--python=\"{}\"",
-            get_venv_python_bin(&workspace_path.join(".venv")).display()
-        ))
-        .arg("-o")
-        .arg(&requirements_file)
-        .arg(requirements_file_in)
-        .current_dir(workspace_path)
-        .env("PYTHONWARNINGS", "ignore");
+    let mut cmd = get_lock_command(
+        output,
+        py_ver,
+        workspace_path,
+        requirements_file_in,
+        &requirements_file,
+    )?;
     if output == CommandOutput::Verbose {
         cmd.arg("--verbose");
     } else {
@@ -435,6 +425,65 @@ fn make_relative_url(path: &Path, base: &Path) -> Result<String, Error> {
         Ok(format!("file:{}", buf))
     }
 }
+
+fn get_lock_command(
+    output: CommandOutput,
+    py_ver: &PythonVersion,
+    workspace_path: &Path,
+    requirements_file_in: &Path,
+    requirements_file: &Path,
+) -> Result<Command, Error> {
+    if env::var("RYE_RUSTINE").ok().as_deref() == Some("1") {
+        return get_rustine_command(
+            output,
+            py_ver,
+            workspace_path,
+            requirements_file_in,
+            requirements_file,
+        );
+    }
+    let pip_compile = get_pip_compile(py_ver, output)?;
+    let mut cmd = Command::new(pip_compile);
+    cmd.arg("--resolver=backtracking")
+        .arg("--no-annotate")
+        .arg("--strip-extras")
+        .arg("--allow-unsafe")
+        .arg("--no-header")
+        .arg("--pip-args")
+        .arg(format!(
+            "--python=\"{}\"",
+            get_venv_python_bin(&workspace_path.join(".venv")).display()
+        ))
+        .arg("-o")
+        .arg(requirements_file)
+        .arg(requirements_file_in)
+        .env("PYTHONWARNINGS", "ignore");
+    Ok(cmd)
+}
+
+fn get_rustine_command(
+    output: CommandOutput,
+    py_ver: &PythonVersion,
+    workspace_path: &Path,
+    requirements_file_in: &Path,
+    requirements_file: &Path,
+) -> Result<Command, Error> {
+    let rustine = get_rustine(py_ver, output)?;
+    let mut cmd = Command::new(rustine);
+    cmd
+        .arg(format!(
+            "--python=\"{}\"",
+            get_venv_python_bin(&workspace_path.join(".venv")).display()
+        ))
+        .arg("-o")
+        .arg(requirements_file)
+        .arg("-r")
+        .arg(requirements_file_in)
+        .current_dir(workspace_path)
+        .env("PYTHONWARNINGS", "ignore");
+    Ok(cmd)
+}
+
 
 #[test]
 fn test_make_relativec_url() {
